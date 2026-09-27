@@ -137,12 +137,11 @@ type CompletedEvent struct {
 
 func main() {
 	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://nats:4222" // fallback for local host testing
-	}
+	log.Printf("[DEBUG] Attempting to connect to NATS at: %q", natsURL)
+
 	nc, err := nats.Connect(natsURL)
 	if err != nil {
-		log.Fatalf("failed to connect to nats: %v", err)
+		log.Fatalf("[FATAL] Failed to connect to NATS at %s: %v", natsURL, err)
 	}
 	defer nc.Close()
 
