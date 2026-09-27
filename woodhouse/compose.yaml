@@ -1,5 +1,6 @@
 services:
   woodhouse:
+    container_name: woodhouse
     build: 
       context: .
       dockerfile: Dockerfile

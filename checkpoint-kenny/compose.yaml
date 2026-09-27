@@ -1,5 +1,6 @@
 services:
   checkpoint-kenny:
+    container_name: checkpoint-kenny
     build: 
       context: .
     env_file: 
