@@ -1,7 +1,12 @@
+
+networks:
+  default:
+    name: fault_default
+    driver: bridge
+
 include:
   - infra/postgres/compose.yaml
   - infra/openobserve/compose.yaml
   - infra/nats/compose.yaml
-
   - woodhouse/compose.yaml
   - checkpoint-kenny/compose.yaml
