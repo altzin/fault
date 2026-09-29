@@ -71,8 +71,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state);
 
     // 5. Server with graceful shutdown
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
-    info!("Server listening on http://127.0.0.1:3000");
+    let address = "0.0.0.0".to_owned();
+    let port = "3000";
+    let conn_details = (address + ":" + port).clone();
+    let listener = tokio::net::TcpListener::bind(conn_details.clone()).await?;
+    info!("Server listening on {conn_details}");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
