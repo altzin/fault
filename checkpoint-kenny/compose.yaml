@@ -9,6 +9,12 @@ services:
       - postgres
       - nats
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kenny.rule=Host(`homelab.fault.local`)" #TODO: define name in dns
+      - "traefik.http.routers.kenny.entrypoints=web"
+      - "traefik.http.services.kenny.loadbalancer.server.port=8080" # Kenny's internal port
+
     
     # Security Sandboxing
     read_only: true

@@ -8,5 +8,6 @@ include:
   - infra/postgres/compose.yaml
   - infra/openobserve/compose.yaml
   - infra/nats/compose.yaml
+  - infra/traefik/compose.yaml
   - woodhouse/compose.yaml
   - checkpoint-kenny/compose.yaml
