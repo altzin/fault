@@ -3,12 +3,15 @@ services:
   openobserve:
     container_name: openobserve
     image: public.ecr.aws/zinclabs/openobserve:latest
-    ports:
-      - "5080:5080" 
     volumes:
       - oodata:/data:Z
     env_file:
       - ../../.env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openobserve.rule=Host(`observe.fault.local`)"
+      - "traefik.http.routers.openobserve.entrypoints=web"
+      - "traefik.http.services.openobserve.loadbalancer.server.port=5080"
 
 volumes:
   oodata:
