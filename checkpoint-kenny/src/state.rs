@@ -4,7 +4,7 @@ use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct AppMetrics {
-    pub items_created: Counter<u64>,
+    pub bookmarks_created: Counter<u64>,
     pub http_requests_total: Counter<u64>,
     pub http_request_duration_seconds: Histogram<f64>,
 }
@@ -12,9 +12,9 @@ pub struct AppMetrics {
 impl AppMetrics {
     pub fn new(meter: &Meter) -> Self {
         Self {
-            items_created: meter
-                .u64_counter("items.created")
-                .with_description("Total number of items successfully created")
+            bookmarks_created: meter
+                .u64_counter("bookmarks.created")
+                .with_description("Total number of bookmarks successfully created")
                 .build(),
             http_requests_total: meter
                 .u64_counter("http.requests.total")

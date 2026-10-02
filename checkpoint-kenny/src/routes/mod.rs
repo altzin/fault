@@ -1,3 +1,4 @@
+use crate::{routes, state::AppState};
 use axum::{
     Router,
     routing::{get, post},
@@ -5,19 +6,21 @@ use axum::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{routes, state::AppState};
-
-mod health;
-mod items;
+pub mod bookmarks;
+mod health; // Changed from items
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
         health::health_handler,
-        // Add other annotated routes here
+        bookmarks::create_bookmark,
+        bookmarks::list_bookmarks
+    ),
+    components(
+        schemas(bookmarks::Bookmark, bookmarks::CreateBookmark)
     ),
     tags(
-        (name = "Health", description = "Service health checks")
+        (name = "Bookmarks", description = "Bookmark management APIs")
     )
 )]
 pub struct ApiDoc;
@@ -25,8 +28,8 @@ pub struct ApiDoc;
 pub fn create_router(is_prod: bool) -> Router<AppState> {
     let mut router = Router::new()
         .route("/healthz", get(health::health_handler))
-        .route("/items", post(items::create_item))
-        .route("/items", get(items::list_items));
+        .route("/bookmarks", post(bookmarks::create_bookmark))
+        .route("/bookmarks", get(bookmarks::list_bookmarks));
 
     if !is_prod {
         let swagger =
