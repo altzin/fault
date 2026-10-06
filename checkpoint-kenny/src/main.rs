@@ -58,7 +58,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .inspect(|_| info!("Database migrations executed successfully"))
         .inspect_err(|e| error!(error = %e, "Database migration failed"))?;
 
-    let state = AppState { db: pool, metrics };
+    // Underneath your postgres pool initialization in main.rs:
+    let nats_client = async_nats::connect(config.nats_url).await?;
+    let js = async_nats::jetstream::new(nats_client);
+
+    let state = AppState {
+        db: pool,
+        metrics,
+        js,
+    };
 
     let app = routes::create_router(config.is_prod)
         // Wrap all routes with our metrics tracker BEFORE providing the state

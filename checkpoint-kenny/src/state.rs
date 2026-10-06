@@ -1,3 +1,4 @@
+use async_nats::jetstream::Context as JetStream;
 use axum::extract::FromRef;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 use sqlx::PgPool;
@@ -33,6 +34,7 @@ impl AppMetrics {
 pub struct AppState {
     pub db: PgPool,
     pub metrics: AppMetrics,
+    pub js: JetStream, // Added
 }
 
 // Allows `State<PgPool>` in handlers

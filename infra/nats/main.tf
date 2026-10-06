@@ -31,3 +31,13 @@ resource "jetstream_stream" "bookmarks_dlq" {
   
   max_age   = 604800 # 7 days
 }
+
+resource "jetstream_object_store" "bookmarks_html" {
+  name        = "BOOKMARKS_HTML"
+  description = "Stores raw HTML payloads for bookmarks"
+  
+  # Optional: Automatically delete HTML after 7 days if you 
+  # only need it during the initial generation phase. 
+  # Remove this if you want to keep the HTML forever.
+  max_age = 604800 
+}

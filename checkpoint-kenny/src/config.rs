@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub db_url: String,
     pub is_prod: bool,
     pub otlp: Option<OtlpConfig>,
+    pub nats_url: String,
 }
 
 impl AppConfig {
@@ -27,6 +28,7 @@ impl AppConfig {
         let service_name = env::var("SERVICE_NAME").expect("SERVICE_NAME must be set");
         let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let is_prod = env::var("APP_ENV").map(|v| v == "prod").unwrap_or(false);
+        let nats_url = env::var("NATS_URL").expect("NATS_URL MISSING and must be set");
 
         let otlp = env::var("OTEL_AUTH_HEADER").ok().map(|auth| OtlpConfig {
             host: env::var("OTEL_HOST").unwrap_or_else(|_| "localhost".to_string()),
@@ -43,6 +45,7 @@ impl AppConfig {
             db_url,
             is_prod,
             otlp,
+            nats_url,
         }
     }
 }
