@@ -46,9 +46,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .log_statements(tracing::log::LevelFilter::Debug)
         // Escalate queries taking >1s to WARN (allowed by your EnvFilter)
         .log_slow_statements(tracing::log::LevelFilter::Warn, Duration::from_secs(1));
+    //TODO: SLOW STATEMENTS REQUIRE PG STAT CONFIG?
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(5) //TODO: MAGIC NUMBER
         .connect_with(db_options)
         .await?;
 
@@ -58,7 +59,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .inspect(|_| info!("Database migrations executed successfully"))
         .inspect_err(|e| error!(error = %e, "Database migration failed"))?;
 
-    // Underneath your postgres pool initialization in main.rs:
     let nats_client = async_nats::connect(config.nats_url).await?;
     let js = async_nats::jetstream::new(nats_client);
 
@@ -69,21 +69,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let app = routes::create_router(config.is_prod)
-        // Wrap all routes with our metrics tracker BEFORE providing the state
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::track_metrics,
         ))
         .with_base_middleware()
-        // Provide the state last so it satisfies the Router<AppState> requirement
         .with_state(state);
 
-    // 5. Server with graceful shutdown
-    let address = "0.0.0.0".to_owned();
-    let port = "3000";
-    let conn_details = (address + ":" + port).clone();
-    let listener = tokio::net::TcpListener::bind(conn_details.clone()).await?;
-    info!("Server listening on {conn_details}");
+    let address = "0.0.0.0";
+    let port = 3000;
+    let listener = tokio::net::TcpListener::bind((address, port)).await?;
+    info!("Server listening on {address}:{port}");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
