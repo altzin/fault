@@ -23,7 +23,7 @@ crash.log
 crash.*.log
 
 # Rust / Checkpoint Kenny
-checkpoint-kenny/target/
+cheryl/target/
 **/*.rs.bk
 
 # Go / Woodhouse
