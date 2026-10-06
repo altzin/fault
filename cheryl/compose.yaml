@@ -1,6 +1,6 @@
 services:
-  checkpoint-kenny:
-    container_name: checkpoint-kenny
+  cheryl:
+    container_name: cheryl
     build: 
       context: .
     env_file: 
@@ -11,10 +11,9 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.kenny.rule=Host(`homelab.fault.local`)" #TODO: define name in dns
-      - "traefik.http.routers.kenny.entrypoints=web"
-      - "traefik.http.services.kenny.loadbalancer.server.port=3000" # Kenny's internal port
-
+      - "traefik.http.routers.cheryl.rule=Host(`homelab.fault.local`)" #TODO: define name in dns
+      - "traefik.http.routers.cheryl.entrypoints=web"
+      - "traefik.http.services.cheryl.loadbalancer.server.port=3000" # Cheryl's internal port
     
     # Security Sandboxing
     read_only: true

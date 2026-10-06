@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y curl unzip && rm -rf /var/lib/apt/lists
 COPY . .
 
 # Build the release binary. 
-# (If building checkpoint-kenny, ensure sqlx-data.json is present - see below)
+# (If building cheryl, ensure sqlx-data.json is present - see below)
 RUN cargo build --release
 
 # ---------------------------------------------------
@@ -28,10 +28,10 @@ RUN addgroup --system --gid 1000 appgroup && \
     adduser --system --uid 1000 --gid 1000 --no-create-home appuser
 
 # Copy ONLY the compiled binary from the builder stage
-COPY --from=builder /app/target/release/checkpoint-kenny /usr/local/bin/checkpoint-kenny
+COPY --from=builder /app/target/release/cheryl /usr/local/bin/cheryl
 
 # Lock down execution to the non-root user
 USER appuser
 
 # The app boots and waits for Docker Compose to inject environment variables
-CMD ["checkpoint-kenny"]
+CMD ["cheryl"]
