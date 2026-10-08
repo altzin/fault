@@ -32,8 +32,8 @@ RUN apk add --no-cache \
     tzdata \
     font-noto
 
-# Create a dedicated, non-root user (Chrome requires this)
-RUN adduser -D -g '' appuser
+# Create a non-root user with UID 1000 using useradd
+RUN useradd -m -u 1000 -s /bin/bash appuser
 
 # Copy ONLY the compiled binary from the builder
 COPY --from=builder /app/woodhouse /usr/local/bin/woodhouse

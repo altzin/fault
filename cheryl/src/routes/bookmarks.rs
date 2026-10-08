@@ -79,7 +79,7 @@ pub async fn create_bookmark(
     if let Some(html) = payload.raw_html {
         if !html.is_empty() {
             // Get the bucket (assume it was created by Terraform)
-            let store = state.js.get_object_store("BOOKMARKS_HTML").await
+            let store = state.js.get_object_store("raw_html").await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to get Object Store");
                     AppError::Database(sqlx::Error::Io(std::io::ErrorKind::ConnectionRefused.into())) // Or map to a new AppError variant
