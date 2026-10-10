@@ -87,7 +87,8 @@ pub async fn create_bookmark(
 
             // Convert HTML string into an async reader
             let mut reader = html.as_bytes();
-            let id_str = bookmark.id.to_string();
+            //TODO: Fix.
+            let id_str = bookmark.id.to_string()+".html"; //seems like a small edit. is important
                 store.put(id_str.as_str(), &mut reader).await
                     .map_err(|e| {
                         tracing::error!(error = %e, "Failed to upload to Object Store");

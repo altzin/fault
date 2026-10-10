@@ -1,0 +1,18 @@
+FROM golang:1.27-alpine
+
+WORKDIR /app
+
+ENV GOCACHE=/app/tmp/go-cache
+
+# Install Air directly into the Go bin path
+RUN go install github.com/air-verse/air@latest
+
+# Copy your dependency files first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# We do NOT copy the rest of the code here!
+# The code will be bind-mounted from your laptop.
+
+# Run Air instead of the compiled binary
+CMD ["air", "-c", ".air.toml"]

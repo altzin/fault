@@ -28,3 +28,6 @@ cheryl/target/
 
 # Go / Woodhouse
 woodhouse/woodhouse
+
+.air.toml
+**/tmp/

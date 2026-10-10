@@ -9,7 +9,6 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -40,21 +39,30 @@ func (w *Worker) HandleMessage(msg jetstream.Msg) {
 		return
 	}
 
-	// 1. Execute Domain Logic
-	md, err := w.generateMarkdown(job.ID)
+	// 1. Fetch the raw HTML that Cheryl saved to the Object Store
+	htmlBytes, err := w.obs.GetBytes(context.Background(), job.ID+".html")
 	if err != nil {
+		log.Printf("Failed to fetch HTML for %s: %v", job.ID, err)
 		w.handleFailure(msg, job, meta.NumDelivered, isFinalAttempt)
 		return
 	}
 
-	// 2. Save to Storage
-	if err := w.saveToStorage(job.ID, md); err != nil {
+	// 2. Execute Domain Logic (Pure string manipulation, no network!)
+	mdBytes, err := w.generateMarkdown(htmlBytes)
+	if err != nil {
+		log.Printf("Failed to convert HTML to Markdown: %v", err)
+		w.handleFailure(msg, job, meta.NumDelivered, isFinalAttempt)
+		return
+	}
+
+	// 3. Save Markdown to Storage
+	if err := w.saveToStorage(job.ID, mdBytes); err != nil {
 		log.Printf("Failed to save to Object Store: %v", err)
 		msg.NakWithDelay(10 * time.Second)
 		return
 	}
 
-	// 3. Publish Completion & Ack
+	// 4. Publish Completion & Ack
 	storageURL := "nats://raw_html/" + job.ID + ".md"
 	w.publishCompletion(job.ID, storageURL)
 	msg.Ack()
@@ -73,6 +81,7 @@ func (w *Worker) handleFailure(msg jetstream.Msg, job BookmarkJob, attempts uint
 }
 
 func (w *Worker) saveToStorage(id string, content []byte) error {
+	log.Printf("Saved %v:\n %v", id, string(content))
 	_, err := w.obs.PutBytes(context.Background(), id+".md", []byte(content))
 	return err
 }
@@ -83,52 +92,17 @@ func (w *Worker) publishCompletion(id, storageURL string) {
 	w.js.Publish(context.Background(), "woodhouse.bookmark.completed", payload)
 }
 
-func (w *Worker) generateMarkdown(targetURL string) ([]byte, error) {
-	// 1. Setup custom allocator options for containerized environments
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("disable-dev-shm-usage", true), // Fixes the 64MB container crash
-	)
-
-	// If the CHROME_BIN environment variable is set (via Docker), tell chromedp to use it
-	if chromeBin := os.Getenv("CHROME_BIN"); chromeBin != "" {
-		opts = append(opts, chromedp.ExecPath(chromeBin))
-	}
-
-	// 2. Create the allocator context
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-
-	// 3. Create the actual browser context with a timeout
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-
-	var htmlBody string
-
-	// Navigate and grab the HTML
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(targetURL),
-		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		chromedp.OuterHTML(`body`, &htmlBody, chromedp.ByQuery),
-	)
-	if err != nil {
-		return "", err
-	}
-
+func (w *Worker) generateMarkdown(htmlBytes []byte) ([]byte, error) {
+	// No context, no timeouts, no headless browsers.
 	converter := md.NewConverter("", true, nil)
-	markdown, err := converter.ConvertString(htmlBody)
+
+	markdown, err := converter.ConvertBytes(htmlBytes)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return []byte(markdown), nil
+	return markdown, nil
 }
-
-// ---------------------------------------------------------
-// INFRASTRUCTURE WIRING (Single Responsibility: Setup)
-// ---------------------------------------------------------
 
 func main() {
 	natsURL := os.Getenv("NATS_URL")

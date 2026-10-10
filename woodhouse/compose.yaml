@@ -3,7 +3,10 @@ services:
     container_name: woodhouse
     build: 
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
+    #for air test
+    volumes:
+      - .:/app
     env_file: 
       - ../.env
     read_only: true
