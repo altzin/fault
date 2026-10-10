@@ -1,7 +1,5 @@
 package main
 
-// Test
-
 import (
 	"context"
 	"encoding/json"
@@ -10,6 +8,8 @@ import (
 	"os/signal"
 	"time"
 
+	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/chromedp/chromedp"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -24,141 +24,146 @@ type CompletedEvent struct {
 	StorageURL string `json:"storage_url"`
 }
 
+type Worker struct {
+	js  jetstream.JetStream
+	obs jetstream.ObjectStore
+}
+
+func (w *Worker) HandleMessage(msg jetstream.Msg) {
+	meta, _ := msg.Metadata()
+	isFinalAttempt := meta.NumDelivered >= 3
+
+	var job BookmarkJob
+	if err := json.Unmarshal(msg.Data(), &job); err != nil {
+		log.Printf("Invalid payload: %v", err)
+		msg.Term() // Bad JSON will never succeed, terminate it
+		return
+	}
+
+	// 1. Execute Domain Logic
+	md, err := w.generateMarkdown(job.ID)
+	if err != nil {
+		w.handleFailure(msg, job, meta.NumDelivered, isFinalAttempt)
+		return
+	}
+
+	// 2. Save to Storage
+	if err := w.saveToStorage(job.ID, md); err != nil {
+		log.Printf("Failed to save to Object Store: %v", err)
+		msg.NakWithDelay(10 * time.Second)
+		return
+	}
+
+	// 3. Publish Completion & Ack
+	storageURL := "nats://raw_html/" + job.ID + ".md"
+	w.publishCompletion(job.ID, storageURL)
+	msg.Ack()
+	log.Printf("SUCCESS: Processed bookmark %s", job.ID)
+}
+
+func (w *Worker) handleFailure(msg jetstream.Msg, job BookmarkJob, attempts uint64, isFinal bool) {
+	if isFinal {
+		log.Printf("[DLQ] Max deliveries reached for %s. Routing to DLQ.", job.URL)
+		w.js.Publish(context.Background(), "woodhouse.bookmark.dlq", msg.Data())
+		msg.Ack()
+		return
+	}
+	log.Printf("Attempt %d failed for %s", attempts, job.URL)
+	msg.NakWithDelay(30 * time.Second)
+}
+
+func (w *Worker) saveToStorage(id string, content []byte) error {
+	_, err := w.obs.PutBytes(context.Background(), id+".md", []byte(content))
+	return err
+}
+
+func (w *Worker) publishCompletion(id, storageURL string) {
+	event := CompletedEvent{ID: id, StorageURL: storageURL}
+	payload, _ := json.Marshal(event)
+	w.js.Publish(context.Background(), "woodhouse.bookmark.completed", payload)
+}
+
+func (w *Worker) generateMarkdown(targetURL string) ([]byte, error) {
+	// 1. Setup custom allocator options for containerized environments
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("disable-dev-shm-usage", true), // Fixes the 64MB container crash
+	)
+
+	// If the CHROME_BIN environment variable is set (via Docker), tell chromedp to use it
+	if chromeBin := os.Getenv("CHROME_BIN"); chromeBin != "" {
+		opts = append(opts, chromedp.ExecPath(chromeBin))
+	}
+
+	// 2. Create the allocator context
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
+	// 3. Create the actual browser context with a timeout
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	var htmlBody string
+
+	// Navigate and grab the HTML
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(targetURL),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.OuterHTML(`body`, &htmlBody, chromedp.ByQuery),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	converter := md.NewConverter("", true, nil)
+	markdown, err := converter.ConvertString(htmlBody)
+	if err != nil {
+		return "", err
+	}
+
+	return []byte(markdown), nil
+}
+
+// ---------------------------------------------------------
+// INFRASTRUCTURE WIRING (Single Responsibility: Setup)
+// ---------------------------------------------------------
+
 func main() {
 	natsURL := os.Getenv("NATS_URL")
-	log.Printf("[DEBUG] Attempting to connect to NATS at: %q", natsURL)
-
 	nc, err := nats.Connect(natsURL)
 	if err != nil {
-		log.Fatalf("[FATAL] Failed to connect to NATS at %s: %v", natsURL, err)
+		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer nc.Close()
 
-	// 1. Initialize the modern JetStream API
-	js, err := jetstream.New(nc)
-	if err != nil {
-		log.Fatalf("[FATAL] Failed to initialize JetStream: %v", err)
+	js, _ := jetstream.New(nc)
+	obs, _ := js.ObjectStore(context.Background(), "raw_html")
+
+	// Inject dependencies into the Worker
+	worker := &Worker{
+		js:  js,
+		obs: obs,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// 2. Declare the Stream
-	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
-		Name:      "WOODHOUSE_EVENTS",
-		Subjects:  []string{"woodhouse.>"},
-		Storage:   jetstream.FileStorage,
-		Retention: jetstream.LimitsPolicy,
-		Discard:   jetstream.DiscardOld,
-	})
-	if err != nil {
-		log.Fatalf("[FATAL] Failed to verify stream: %v", err)
-	}
-	log.Printf("[INFO] Stream %q successfully initialized.", stream.CachedInfo().Config.Name)
-
-	// 3. Declare the Consumer (replaces QueueSubscribe)
-	cons, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+	// Setup Stream and Consumer... (omitted error handling for brevity)
+	stream, _ := js.Stream(context.Background(), "WOODHOUSE_EVENTS")
+	cons, _ := stream.CreateOrUpdateConsumer(context.Background(), jetstream.ConsumerConfig{
 		Durable:       "bookmark-workers",
-		DeliverGroup:  "bookmark-workers", // This creates the queue group behavior
+		DeliverGroup:  "bookmark-workers",
 		FilterSubject: "woodhouse.bookmark.pending",
 		MaxDeliver:    3,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 	})
-	if err != nil {
-		log.Fatalf("[FATAL] Failed to create consumer: %v", err)
-	}
 
-	// 4. Start consuming (msg is now jetstream.Msg, not *nats.Msg)
-	cc, err := cons.Consume(func(msg jetstream.Msg) {
-		// Extract metadata to track delivery attempts
-		meta, metaErr := msg.Metadata()
-		isFinalAttempt := metaErr == nil && meta.NumDelivered >= 3
-
-		var job BookmarkJob
-		if err := json.Unmarshal(msg.Data(), &job); err != nil {
-			log.Printf("Invalid payload, terminating message: %v", err)
-			msg.Term()
-			return
-		}
-
-		// Mocking your generation failure
-		err = generateMarkdownMock()
-		if err != nil {
-			if isFinalAttempt {
-				log.Printf("[DLQ] Max deliveries (3) reached for %s. Routing to DLQ.", job.URL)
-
-				// 1. Publish to the DLQ subject
-				_, pubErr := js.Publish(context.Background(), "woodhouse.bookmark.dlq", msg.Data())
-				if pubErr != nil {
-					log.Printf("CRITICAL: Failed to write to DLQ: %v", pubErr)
-					msg.NakWithDelay(10 * time.Second) // Force retry if DLQ write fails
-					return
-				}
-
-				// 2. Ack the original message so the consumer stops trying
-				msg.Ack()
-				return
-			}
-
-			log.Printf("Attempt %d failed for %s: %v", meta.NumDelivered, job.URL, err)
-			msg.NakWithDelay(30 * time.Second)
-			return
-		}
-
-		log.Printf("SUCCESS: Processed bookmark for %s", job.URL)
-		// 1. Initialize the modern JetStream API
-		js, err := jetstream.New(nc)
-		if err != nil {
-			log.Fatalf("[FATAL] Failed to initialize JetStream: %v", err)
-		}
-
-		// 2. Define the exact stream requirements
-		cfg := jetstream.StreamConfig{
-			Name:      "WOODHOUSE_EVENTS",
-			Subjects:  []string{"woodhouse.>"},
-			Storage:   jetstream.FileStorage,
-			Retention: jetstream.LimitsPolicy,
-			Discard:   jetstream.DiscardOld,
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// 3. Declarative initialization (creates or patches the stream)
-		stream, err := js.CreateOrUpdateStream(ctx, cfg)
-		if err != nil {
-			log.Fatalf("[FATAL] Failed to verify stream: %v", err)
-		}
-
-		log.Printf("[INFO] Stream %q successfully initialized.", stream.CachedInfo().Config.Name)
-
-		publishCompletion(context.Background(), js, job.ID, "local://stdout-only")
-		msg.Ack()
-	})
+	// Start consuming using the Worker's method as the callback
+	cc, _ := cons.Consume(worker.HandleMessage)
 	defer cc.Stop()
 
 	log.Println("Bookmark worker started. Listening for events...")
-
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	<-sig
 	log.Println("Shutting down worker...")
-}
-
-func generateMarkdownMock() error {
-	panic("unimplemented")
-}
-
-// Pass context.Context and jetstream.JetStream (v2) instead of nats.JetStreamContext (v1)
-func publishCompletion(ctx context.Context, js jetstream.JetStream, id, storageURL string) {
-	event := CompletedEvent{
-		ID:         id,
-		StorageURL: storageURL,
-	}
-	payload, _ := json.Marshal(event)
-
-	// v2 Publish requires a context
-	if _, err := js.Publish(ctx, "woodhouse.bookmark.completed", payload); err != nil {
-		log.Printf("Failed to publish completion event for %s: %v", id, err)
-	}
 }
